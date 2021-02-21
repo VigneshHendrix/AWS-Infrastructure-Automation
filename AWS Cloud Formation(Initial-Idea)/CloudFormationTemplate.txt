@@ -1,0 +1,485 @@
+{
+    "Description": "An aws Infrastructure/Stack for Wordpress",
+    "Resources": {
+        "VPC": {
+            "Type": "AWS::EC2::VPC",
+            "Properties": {
+                "CidrBlock": "10.0.0.0/16",
+                "EnableDnsHostnames": True,
+                "EnableDnsSupport": True,
+                "Tags": [
+                    {
+                        "Key": "APWP",
+                        "Value": "Instance for Apache-PHP and Wordpress"
+                    }
+                ]
+            }
+        },
+        "PublicSubnet": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "CidrBlock": "10.0.1.0/24",
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "AvailabilityZone": "us-east-2a",
+                "Tags": [
+                    {
+                        "Key": "Subnet Type",
+                        "Value": "Public Subnet for Apache-PHP"
+                    }
+                ],
+                "MapPublicIpOnLaunch": True
+            }
+        },
+        "PrivateSubnet": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "CidrBlock": "10.0.2.0/24",
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "Tags": [
+                    {
+                        "Key": "Subnet Type",
+                        "Value": "Private Subnet for MySQL"
+                    }
+                ]
+            }
+        },
+        "InternetGateway": {
+            "Type": "AWS::EC2::InternetGateway",
+            "Properties": {
+                "Tags": [
+                    {
+                        "Key": "IGW for Public Subnet",
+                        "Value": "IGW for APWP"
+                    }
+                ]
+            }
+        },
+        "AttachGateway": {
+            "Type": "AWS::EC2::VPCGatewayAttachment",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "InternetGatewayId": {
+                    "Ref": "InternetGateway"
+                }
+            }
+        },
+        "PbRouteTable": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "Tags": [
+                    {
+                        "Key": "PublicRT",
+                        "Value": "PublicRT"
+                    }
+                ]
+            }
+        },
+        "RoutePb": {
+            "Type": "AWS::EC2::Route",
+            "Properties": {
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "GatewayId": {
+                    "Ref": "InternetGateway"
+                },
+                "RouteTableId": {
+                    "Ref": "PbRouteTable"
+                }
+            }
+        },
+        "SubnetAssociationFrPBRT": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "SubnetId": {
+                    "Ref": "PublicSubnet"
+                },
+                "RouteTableId": {
+                    "Ref": "PbRouteTable"
+                }
+            }
+        },
+        "PrRouteTable": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "Tags": [
+                    {
+                        "Key": "PrivateRouteTable",
+                        "Value": "PrivateRouteTable"
+                    }
+                ]
+            }
+        },
+        "SubnetAssociationfrPRRT": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "PrRouteTable"
+                },
+                "SubnetId": {
+                    "Ref": "PrivateSubnet"
+                }
+            }
+        },
+        "NatGateway": {
+            "Type": "AWS::EC2::NatGateway",
+            "Properties": {
+                "SubnetId": {
+                    "Ref": "PublicSubnet"
+                },
+                "AllocationId": {
+                    "Fn::GetAtt": [
+                        "MyEIP",
+                        "AllocationId"
+                    ]
+                }
+            }
+        },
+        "MyEIP": {
+            "Type": "AWS::EC2::EIP",
+            "Properties": {
+                "Domain": "vpc"
+            }
+        },
+        "Route": {
+            "Type": "AWS::EC2::Route",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "PrRouteTable"
+                },
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "NatGatewayId": {
+                    "Ref": "NatGateway"
+                }
+            }
+        },
+        "LBSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "Allow all resources from outside through HTTP to Load Balancer ",
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "GroupName": "LoadBalSGFrAPWP",
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": 80,
+                        "ToPort": 80,
+                        "CidrIp": "0.0.0.0/0"
+                    }
+                ]
+            }
+        },
+        "APWPInnerSg": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "Allow resources from HTTP only from Load Balancer SG to here",
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": 80,
+                        "ToPort": 80,
+                        "SourceSecurityGroupId": {
+                            "Ref": "LBSecurityGroup"
+                        }
+                    }
+                ]
+            }
+        },
+        "SecurityGroupFrPrInstance": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "Inbound Rules for Private Instance",
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": 80,
+                        "ToPort": 80,
+                        "CidrIp": "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": 22,
+                        "ToPort": 22,
+                        "CidrIp": "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": 3389,
+                        "ToPort": 3389,
+                        "CidrIp": "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": 443,
+                        "ToPort": 443,
+                        "CidrIp": "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": 3306,
+                        "ToPort": 3306,
+                        "SourceSecurityGroupId": {
+                            "Ref": "APWPInnerSg"
+                        }
+                    }
+                ]
+            }
+        },
+        "InstanceforAPWP": {
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "InstanceType": "t2.micro",
+                "ImageId": "ami-0a91cd140a1fc148a",
+                "SubnetId": {
+                    "Ref": "PublicSubnet"
+                },
+                "KeyName": "First_Instance",
+                "SecurityGroupIds": [
+                    {
+                        "Ref": "APWPInnerSg"
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Instance Purpose",
+                        "Value": "Instance for Apache-PHP and Wordpress"
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "\n",
+                            [
+                                "#!/bin/bash",
+                                "sudo apt-get update -y",
+                                "sudo apt-get install apache2 -y",
+                                "sudo /etc/init.d/apache2 start",
+                                "sudo apt-get install mysql-client -y",
+                                "sudo apt-get install php libapache2-mod-php php-mysql -y",
+                                "sudo /etc/init.d/apache2 restart",
+                                "wget http://wordpress.org/latest.zip",
+                                "sudo apt install unzip",
+                                "unzip -q latest.zip -d /var/www/html",
+                                "chown -R www-data:www-data /var/www/html/wordpress",
+                                "chmod -R 755 /var/www/html/wordpress",
+                                "mkdir -p /var/www/html/wordpress/wp-content/uploads",
+                                "chown -R www-data:www-data /var/www/html/wordpress/wp-content/uploads",
+                                "sudo service apache2 restart"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "InstanceforMySQL": {
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "InstanceType": "t2.micro",
+                "ImageId": "ami-0a91cd140a1fc148a",
+                "SubnetId": {
+                    "Ref": "PrivateSubnet"
+                },
+                "KeyName": "First_Instance",
+                "SecurityGroupIds": [
+                    {
+                        "Ref": "SecurityGroupFrPrInstance"
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Instance Purpose",
+                        "Value": "Instance for MySQL DB"
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "\n",
+                            [
+                                "#!/bin/bash",
+                                "sudo su",
+                                "sudo apt-get update -y",
+                                "sudo apt-get install mysql-server -y",
+                                "sudo apt-get install php libapache2-mod-php php-mysql -y",
+                                "sudo mysql -u root -pVasanthi@24 -e \"CREATE DATABASE WordpressInfo DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci;\"",
+                                "sudo mysql -u root -pVasanthi@24 -e \"use WordpressInfo;\"",
+                                "sudo mysql -u root -pVasanthi@24 -e \"create user 'vignesh'@'%' identified by 'Vasanthi@24';\"",
+                                "sudo mysql -u root -pVasanthi@24 -e \"grant all on WordpressInfo.* to 'vignesh'@'%';\"",
+                                "sudo mysql -u root -pVasanthi@24 -e \"GRANT ALL PRIVILEGES ON WordpressInfo.* TO 'vignesh'@'%';\"",
+                                "sudo mysql -u root -pVasanthi@24 -e \"FLUSH PRIVILEGES;\"",
+                                "sed -i 's/127.0.0.1/0.0.0.0/g' /etc/mysql/mysql.conf.d/mysqld.cnf",
+                                "sudo service mysql restart"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "PublicSubnet2": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "CidrBlock": "10.0.3.0/24",
+                "AvailabilityZone": "us-east-2b",
+                "Tags": [
+                    {
+                        "Key": "Extra Public Subnet",
+                        "Value": "Exra Public Subnet"
+                    }
+                ]
+            }
+        },
+        "LaunchConfiguration": {
+            "Type": "AWS::AutoScaling::LaunchConfiguration",
+            "Properties": {
+                "AssociatePublicIpAddress": True,
+                "LaunchConfigurationName": "APWPLC",
+                "ImageId": "ami-03946fd338928596f",
+                "InstanceType": "t2.micro",
+                "SecurityGroups": [
+                    {
+                        "Ref": "APWPInnerSg"
+                    }
+                ],
+                "KeyName": "First_Instance",
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "\n",
+                            [
+                                "#!/bin/bash",
+                                "sudo apt-get install mysql-client -y",
+                                "sudo service apache2 restart"
+                            ]
+                        ]
+                    }
+                }
+            }
+        },
+        "TargetGroup": {
+            "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+            "Properties": {
+                "Name": "TGforAPWPASG",
+                "Port": 80,
+                "Protocol": "HTTP",
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+        },
+        "AutoScalingGroup": {
+            "Type": "AWS::AutoScaling::AutoScalingGroup",
+            "Properties": {
+                "AutoScalingGroupName": "APWPASG",
+                "LaunchConfigurationName": {
+                    "Ref": "LaunchConfiguration"
+                },
+                "VPCZoneIdentifier": [
+                    {
+                        "Ref": "PublicSubnet"
+                    },
+                    {
+                        "Ref": "PublicSubnet2"
+                    }
+                ],
+                "MinSize": "1",
+                "MaxSize": "3",
+                "DesiredCapacity": "1",
+                "Cooldown": "300",
+                "TargetGroupARNs": [
+                    {
+                        "Ref": "TargetGroup"
+                    }
+                ]
+            }
+        },
+        "ScalingPolicy": {
+            "Type": "AWS::AutoScaling::ScalingPolicy",
+            "Properties": {
+                "AdjustmentType": "ChangeInCapacity",
+                "AutoScalingGroupName": {
+                    "Ref": "AutoScalingGroup"
+                },
+                "Cooldown": "300",
+                "PolicyType": "TargetTrackingScaling",
+                "TargetTrackingConfiguration": {
+                    "PredefinedMetricSpecification": {
+                        "PredefinedMetricType": "ASGAverageCPUUtilization"
+                    },
+                    "TargetValue": 70
+                }
+            }
+        },
+        "LoadBalancerforAPWP": {
+            "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+            "Properties": {
+                "Name": "LBforAPWPASG",
+                "Scheme": "internet-facing",
+                "IpAddressType": "ipv4",
+                "SecurityGroups": [
+                    {
+                        "Ref": "LBSecurityGroup"
+                    }
+                ],
+                "Type": "application",
+                "Subnets": [
+                    {
+                        "Ref": "PublicSubnet"
+                    },
+                    {
+                        "Ref": "PublicSubnet2"
+                    }
+                ]
+            }
+        },
+        "Listener": {
+            "Type": "AWS::ElasticLoadBalancingV2::Listener",
+            "Properties": {
+                "LoadBalancerArn": {
+                    "Ref": "LoadBalancerforAPWP"
+                },
+                "Port": 80,
+                "Protocol": "HTTP",
+                "DefaultActions": [
+                    {
+                        "Type": "forward",
+                        "TargetGroupArn": {
+                            "Ref": "TargetGroup"
+                        }
+                    }
+                ]
+            }
+        }
+    },
+    "Outputs": {
+        "URL": {
+            "Value": {
+                "Fn::GetAtt": [
+                    "LoadBalancerforAPWP",
+                    "DNSName"
+                ]
+            },
+            "Description": "Newly created application URL"
+        }
+    }
+}
